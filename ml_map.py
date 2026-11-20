@@ -1,126 +1,292 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import math
+
+# -------------------------------
+# 1. Project Parameters
+# -------------------------------
 
 N = 100000
 
-bits = np.random.randint(0, 2, N)
-signal = 2 * bits - 1
-snr_db = 6
-snr = 10 ** (snr_db / 10)
-sigma = np.sqrt(1 / (2 * snr))
-noise = sigma * np.random.randn(N)
-received = signal + noise
+P0 = 0.2
+P1 = 0.8
 
-ml_bits = (received >= 0).astype(int)
-ml_errors = np.sum(bits != ml_bits)
-ml_ber = ml_errors / N
+SNR_dB = [0, 2, 4, 6, 8, 10, 12]
 
-print("Original bits:", bits[:20])
-print("Transmitted signal:", signal[:20])
-print("Received signal:", received[:20])
-print("\nML Receiver Results")
-print("Number of errors:", ml_errors)
-print("BER:", ml_ber)
+rng = np.random.default_rng()
 
-p0 = 0.2
-p1 = 0.8
+BER_ML = []
+BER_MAP = []
 
-bits_map = np.random.choice([0, 1], N, p=[p0, p1])
-signal_map = 2 * bits_map - 1
-noise_map = sigma * np.random.randn(N)
-received_map = signal_map + noise_map
+BER_ML_theory = []
+BER_MAP_theory = []
 
-threshold = (sigma ** 2 / 2) * np.log(p0 / p1)
+saved_data = None
 
-map_bits = (received_map > threshold).astype(int)
-map_errors = np.sum(bits_map != map_bits)
-map_ber = map_errors / N
 
-ml_bits_map = (received_map >= 0).astype(int)
-ml_errors_map = np.sum(bits_map != ml_bits_map)
-ml_ber_map = ml_errors_map / N
+# -------------------------------
+# 2. Q Function
+# -------------------------------
 
-print("\nMAP Receiver Results")
-print("MAP Threshold:", threshold)
-print("MAP Number of Errors:", map_errors)
-print("MAP BER:", map_ber)
+def Q(x):
+    return 0.5 * math.erfc(x / math.sqrt(2))
 
-print("\nML Receiver Results (Unequal Probabilities)")
-print("ML Number of Errors:", ml_errors_map)
-print("ML BER:", ml_ber_map)
 
-snr_values = np.arange(0, 14, 2)
-ber_ml_values = []
-ber_map_values = []
+# -------------------------------
+# 3. BER Simulation
+# -------------------------------
 
-for snr_db in snr_values:
-    snr = 10 ** (snr_db / 10)
-    sigma = np.sqrt(1 / (2 * snr))
+for snr in SNR_dB:
 
-    bits = np.random.choice([0, 1], N, p=[p0, p1])
-    signal = 2 * bits - 1
-    received = signal + sigma * np.random.randn(N)
+    snr_linear = 10 ** (snr / 10)
 
-    ml_bits = (received >= 0).astype(int)
-    threshold = (sigma ** 2 / 2) * np.log(p0 / p1)
-    map_bits = (received > threshold).astype(int)
+    sigma = np.sqrt(1 / (2 * snr_linear))
 
-    ber_ml_values.append(np.mean(bits != ml_bits))
-    ber_map_values.append(np.mean(bits != map_bits))
+    # Generate random bits
+    bits = rng.choice([0, 1], size=N, p=[P0, P1])
 
-print("\nBER vs SNR Results")
+    # BPSK Modulation
+    transmitted = 2 * bits - 1
 
-for i in range(len(snr_values)):
-    print("SNR:", snr_values[i],
-          "ML BER:", ber_ml_values[i],
-          "MAP BER:", ber_map_values[i])
+    # AWGN Channel
+    noise = rng.normal(0, sigma, N)
 
-plt.figure(figsize=(9, 5))
-plt.semilogy(snr_values, ber_ml_values, 'o-', label='ML')
-plt.semilogy(snr_values, ber_map_values, 's-', label='MAP')
-plt.xlabel("SNR (dB)")
-plt.ylabel("Bit Error Rate (BER)")
-plt.title("BER Comparison of ML and MAP Receivers")
-plt.grid(True, which="both")
+    received = transmitted + noise
+
+    # ML Receiver
+    detected_ML = (received > 0).astype(int)
+
+    # MAP Threshold
+    threshold_MAP = (sigma ** 2 / 2) * np.log(P0 / P1)
+
+    # MAP Receiver
+    detected_MAP = (received > threshold_MAP).astype(int)
+
+    # Calculate Errors
+    errors_ML = np.sum(bits != detected_ML)
+    errors_MAP = np.sum(bits != detected_MAP)
+
+    # Calculate Experimental BER
+    ber_ml = errors_ML / N
+    ber_map = errors_MAP / N
+
+    BER_ML.append(ber_ml)
+    BER_MAP.append(ber_map)
+
+    # Calculate Theoretical BER
+    ber_ml_th = Q(1 / sigma)
+
+    ber_map_th = (
+        P0 * Q((threshold_MAP + 1) / sigma)
+        +
+        P1 * Q((1 - threshold_MAP) / sigma)
+    )
+
+    BER_ML_theory.append(ber_ml_th)
+    BER_MAP_theory.append(ber_map_th)
+
+    # Print Results
+    print("--------------------------------")
+    print("SNR =", snr, "dB")
+
+    print("ML Errors =", errors_ML)
+    print("ML Experimental BER =", ber_ml)
+    print("ML Theoretical BER =", ber_ml_th)
+
+    print("MAP Errors =", errors_MAP)
+    print("MAP Experimental BER =", ber_map)
+    print("MAP Theoretical BER =", ber_map_th)
+
+    # Save data at SNR = 6 dB
+    if snr == 6:
+
+        saved_data = (
+            bits[:20],
+            transmitted[:20],
+            received[:20],
+            detected_ML[:20],
+            detected_MAP[:20],
+            threshold_MAP
+        )
+
+
+# -------------------------------
+# 4. BER Comparison Plot
+# -------------------------------
+
+plot_floor = 0.5 / N
+
+BER_ML_plot = np.maximum(BER_ML, plot_floor)
+BER_MAP_plot = np.maximum(BER_MAP, plot_floor)
+
+plt.figure(figsize=(10, 7))
+
+plt.semilogy(
+    SNR_dB,
+    BER_ML_plot,
+    'o-',
+    label='ML Experimental'
+)
+
+plt.semilogy(
+    SNR_dB,
+    BER_MAP_plot,
+    's-',
+    label='MAP Experimental'
+)
+
+plt.semilogy(
+    SNR_dB,
+    BER_ML_theory,
+    '--',
+    label='ML Theoretical'
+)
+
+plt.semilogy(
+    SNR_dB,
+    BER_MAP_theory,
+    '--',
+    label='MAP Theoretical'
+)
+
+# Mark zero-error experimental points
+for i in range(len(SNR_dB)):
+
+    if BER_ML[i] == 0:
+        plt.scatter(
+            SNR_dB[i],
+            plot_floor,
+            marker='v',
+            facecolors='none',
+            edgecolors='blue'
+        )
+
+    if BER_MAP[i] == 0:
+        plt.scatter(
+            SNR_dB[i],
+            plot_floor,
+            marker='v',
+            facecolors='none',
+            edgecolors='orange'
+        )
+
+plt.xlabel('SNR (dB)')
+plt.ylabel('Bit Error Rate (BER)')
+
+plt.title('Experimental and Theoretical BER Comparison')
+
+plt.grid(True, which='both')
 plt.legend()
+plt.tight_layout()
 plt.show()
 
-N_vis = 30
-bits_vis = np.random.choice([0, 1], N_vis, p=[p0, p1])
-signal_vis = 2 * bits_vis - 1
-snr_vis = 10 ** (6 / 10)
-sigma_vis = np.sqrt(1 / (2 * snr_vis))
-received_vis = signal_vis + sigma_vis * np.random.randn(N_vis)
 
-ml_vis = (received_vis >= 0).astype(int)
-threshold_vis = (sigma_vis ** 2 / 2) * np.log(p0 / p1)
-map_vis = (received_vis > threshold_vis).astype(int)
+# -------------------------------
+# 5. Signal Visualization
+# -------------------------------
 
-x = np.arange(20)
-fig, ax = plt.subplots(3, 1, figsize=(10, 9))
+bits, transmitted, received, detected_ML, detected_MAP, threshold_MAP = saved_data
 
-ax[0].step(x, bits_vis[:20], where='mid')
-ax[0].set_title("Original Bits")
-ax[0].set_ylabel("Bit")
-ax[0].grid(True)
+time = np.arange(20)
 
-ax[1].plot(x, signal_vis[:20], 'o-', label='Transmitted')
-ax[1].plot(x, received_vis[:20], 's-', label='Received')
-ax[1].axhline(0, linestyle='--', label='ML Threshold')
-ax[1].axhline(threshold_vis, linestyle=':', label='MAP Threshold')
-ax[1].set_title("Transmitted and Received Signals")
-ax[1].set_ylabel("Amplitude")
-ax[1].legend()
-ax[1].grid(True)
+plt.figure(figsize=(12, 9))
 
-ax[2].step(x, bits_vis[:20], where='mid', label='Original')
-ax[2].step(x, ml_vis[:20], where='mid', linestyle='--', label='ML')
-ax[2].step(x, map_vis[:20], where='mid', linestyle=':', label='MAP')
-ax[2].set_title("Receiver Decisions")
-ax[2].set_xlabel("Bit Number")
-ax[2].set_ylabel("Bit")
-ax[2].legend()
-ax[2].grid(True)
+# Original Bits
+plt.subplot(2, 2, 1)
+
+plt.step(time, bits, where='mid')
+
+plt.title('Original Binary Data')
+plt.xlabel('Sample')
+plt.ylabel('Bit')
+plt.yticks([0, 1])
+plt.grid(True)
+
+
+# Transmitted BPSK Signal
+plt.subplot(2, 2, 2)
+
+plt.stem(time, transmitted)
+
+plt.title('Transmitted BPSK Signal')
+plt.xlabel('Sample')
+plt.ylabel('Amplitude')
+plt.grid(True)
+
+
+# Received Signal
+plt.subplot(2, 2, 3)
+
+plt.stem(time, received)
+
+plt.axhline(
+    0,
+    color='red',
+    linestyle='--',
+    label='ML Threshold'
+)
+
+plt.axhline(
+    threshold_MAP,
+    color='green',
+    linestyle='--',
+    label='MAP Threshold'
+)
+
+plt.title('Received Signal')
+plt.xlabel('Sample')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid(True)
+
+
+# Receiver Decisions
+plt.subplot(2, 2, 4)
+
+plt.step(
+    time,
+    detected_ML,
+    where='mid',
+    label='ML Decisions'
+)
+
+plt.step(
+    time,
+    detected_MAP,
+    where='mid',
+    linestyle='--',
+    label='MAP Decisions'
+)
+
+plt.title('Receiver Decisions')
+plt.xlabel('Sample')
+plt.ylabel('Detected Bit')
+plt.yticks([0, 1])
+plt.legend()
+plt.grid(True)
 
 plt.tight_layout()
 plt.show()
+
+
+# -------------------------------
+# 6. Final Comparison at 6 dB
+# -------------------------------
+
+index = SNR_dB.index(6)
+
+print("\n========== FINAL RESULTS ==========")
+
+print("SNR = 6 dB")
+
+print("ML Experimental BER =", BER_ML[index])
+print("ML Theoretical BER =", BER_ML_theory[index])
+
+print("MAP Experimental BER =", BER_MAP[index])
+print("MAP Theoretical BER =", BER_MAP_theory[index])
+
+print("ML Threshold = 0")
+
+print("MAP Threshold =", saved_data[5])
+
+print("===================================")
